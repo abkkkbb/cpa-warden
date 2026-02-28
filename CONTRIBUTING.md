@@ -1,57 +1,69 @@
 # Contributing
 
-Thanks for contributing to `cpa-warden`.
+## Scope Of Contributions
 
-## Before You Start
+Contributions are welcome for documentation, bug fixes, stability improvements, and CLI usability improvements. Keep changes focused on the current purpose of the project: safe and understandable CPA account scanning and maintenance for known environments.
 
-- Use `uv` for dependency management
-- Keep sensitive values out of code and commits
-- Do not commit local runtime artifacts such as `config.json`, SQLite databases, logs, or exported account lists
+## Local Setup
 
-## Development Setup
+Install dependencies:
 
 ```bash
 uv sync
 ```
 
-Run the script:
+Check the CLI entrypoint:
 
 ```bash
-uv run python cpa_warden.py --mode scan
+uv run python cpa_warden.py --help
 ```
 
-## Contribution Guidelines
-
-- Keep changes focused and easy to review
-- Prefer small pull requests
-- Preserve the external-config design for secrets
-- Update documentation when behavior or CLI options change
-- Keep terminal output concise in production mode
-- Put verbose troubleshooting details behind debug logging
-
-## Validation
-
-At minimum, before opening a pull request, run:
+Run the minimum syntax validation:
 
 ```bash
+uv run python -m py_compile cpa_warden.py clean_codex_accounts.py
+```
+
+## Development Guidelines
+
+- Do not put secrets in code, documentation examples, issue reports, or pull requests.
+- If you change configuration keys, defaults, CLI behavior, or output files, update the relevant README sections, `config.example.json`, and `CHANGELOG.md` in the same change.
+- Keep production terminal output concise. Put detailed troubleshooting information behind debug logging and the log file.
+- If behavior changes, update the command examples and explanatory text that describe that behavior.
+- Avoid broad refactors unless they are necessary for the change being proposed.
+
+## Documentation Expectations
+
+- `README.md` and `README.zh-CN.md` should stay aligned in structure and meaning.
+- CLI flags, default values, and output artifact names documented in Markdown must match the current source code.
+- If a compatibility path remains supported, document it clearly as compatibility-only rather than the preferred path.
+
+## Validation Before PR
+
+Before opening a pull request, run at least:
+
+```bash
+uv sync
 uv run python -m py_compile cpa_warden.py clean_codex_accounts.py
 uv run python cpa_warden.py --help
 ```
 
-If your change affects runtime behavior, test against your own local CPA environment and sanitize any output before sharing.
+If your change affects runtime behavior, validate it against your own CPA environment and sanitize all logs, exports, and screenshots before sharing them.
 
-## Pull Requests
+## Security And Sensitive Data Handling
 
-- Describe the problem and the behavior change
-- Mention any config or output format changes
-- Include sample output only after removing secrets and account identifiers where necessary
+Never commit:
 
-## Security
+- real `token` values
+- real account identifiers unless explicitly required and fully sanitized
+- local runtime artifacts such as `config.json`, SQLite databases, log files, or exported account JSON
 
-- Never commit real `token` values
-- Never commit real account identifiers unless absolutely required and explicitly sanitized
-- If you find a security issue, avoid posting sensitive details in a public issue
+If you need to share output for debugging, remove secrets and operational identifiers first.
 
-## License
+## Pull Request Expectations
 
-By contributing to this project, you agree that your contributions will be licensed under the MIT License.
+- Describe the problem being solved.
+- Summarize the behavior change clearly.
+- Mention any config, logging, export, or compatibility impact.
+- Include the validation commands you ran.
+- Keep example output sanitized.

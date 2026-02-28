@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an improvement for cpa-clean
+about: Suggest an improvement for cpa-warden
 title: "[Feature] "
 labels: enhancement
 assignees: ""
@@ -21,4 +21,3 @@ Describe any alternative approaches you considered.
 ## Additional context
 
 Add any other context, examples, or constraints here.
-

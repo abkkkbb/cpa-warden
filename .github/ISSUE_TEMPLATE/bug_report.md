@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible problem in cpa-clean
+about: Report a reproducible problem in cpa-warden
 title: "[Bug] "
 labels: bug
 assignees: ""
@@ -32,4 +32,3 @@ Paste sanitized logs or terminal output here. Do not include real tokens, accoun
 ## Additional context
 
 Anything else that helps reproduce the issue.
-
