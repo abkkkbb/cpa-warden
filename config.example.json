@@ -1,0 +1,19 @@
+{
+  "base_url": "https://your-cpa.example.com",
+  "token": "replace-with-your-management-token",
+  "target_type": "codex",
+  "provider": "",
+  "probe_workers": 40,
+  "action_workers": 20,
+  "timeout": 15,
+  "retries": 1,
+  "quota_action": "disable",
+  "delete_401": true,
+  "auto_reenable": true,
+  "db_path": "cpa_warden_state.sqlite3",
+  "invalid_output": "cpa_warden_401_accounts.json",
+  "quota_output": "cpa_warden_quota_accounts.json",
+  "log_file": "cpa_warden.log",
+  "debug": false,
+  "user_agent": "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
+}
