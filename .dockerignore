@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+.uv-cache
+__pycache__
+*.pyc
+config.json
+*.local.json
+*.sqlite3
+*.log
+cpa_warden_401_accounts.json
+cpa_warden_quota_accounts.json
+.env
+.env.*
