@@ -61,13 +61,13 @@ def _read_stats(data_dir: Path) -> dict | None:
             counts_row = conn.execute("""
                 SELECT
                     COUNT(*) AS total,
-                    SUM(is_invalid_401)  AS invalid_401,
-                    SUM(is_quota_limited) AS quota_limited,
-                    SUM(is_recovered)    AS recovered,
-                    SUM(CASE WHEN disabled = 1 THEN 1 ELSE 0 END) AS disabled,
-                    SUM(CASE WHEN is_invalid_401 = 0 AND is_quota_limited = 0
+                    COALESCE(SUM(CASE WHEN is_invalid_401 = 0 AND is_quota_limited = 0
                               AND (disabled IS NULL OR disabled = 0)
-                         THEN 1 ELSE 0 END) AS healthy
+                         THEN 1 ELSE 0 END), 0) AS healthy,
+                    COALESCE(SUM(is_invalid_401), 0) AS invalid_401,
+                    COALESCE(SUM(is_quota_limited), 0) AS quota_limited,
+                    COALESCE(SUM(is_recovered), 0) AS recovered,
+                    COALESCE(SUM(CASE WHEN disabled = 1 THEN 1 ELSE 0 END), 0) AS disabled
                 FROM auth_accounts
             """).fetchone()
             accounts = dict(counts_row) if counts_row else None
@@ -108,6 +108,13 @@ def _resolve_data_dir(iid: str) -> Path:
     return DATA_DIR / f"instance_{iid}"
 
 
+def _safe_int(value: object, default: int) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 # ─── 实例发现 ─────────────────────────────────────────────────
 
 def _discover_instances() -> list[dict]:
@@ -145,9 +152,9 @@ def _discover_instances() -> list[dict]:
 
         instances.append({
             "id": iid,
-            "base_url": meta.get("base_url", ""),
-            "mode": meta.get("mode", "scan"),
-            "interval": meta.get("interval", 1800),
+            "base_url": str(meta.get("base_url", "")),
+            "mode": meta.get("mode", "scan") if meta.get("mode") in ("scan", "maintain") else "scan",
+            "interval": _safe_int(meta.get("interval", 1800), 1800),
             "running": running,
             "trigger_pending": trigger_pending,
             "last_run": last_run,
@@ -268,22 +275,39 @@ h1{font-size:1.4rem;color:#f0f3f6;margin-bottom:.3rem}
 <div class="grid" id="grid"><div class="loading">加载中...</div></div>
 <div class="footer">每 10 秒自动刷新</div>
 <script>
-function fmt(s){if(s>=3600)return(s/3600)+'h';if(s>=60)return(s/60)+'m';return s+'s';}
+function esc(v){const m={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};return String(v??'').replace(/[&<>"']/g,c=>m[c]);}
+function fmt(s){
+  const t=Math.floor(Number(s));
+  if(!Number.isFinite(t)||t<0)return '-';
+  if(t>=3600){const h=Math.floor(t/3600),m=Math.floor((t%3600)/60);return m>0?h+'h'+m+'m':h+'h';}
+  if(t>=60)return Math.floor(t/60)+'m';
+  return t+'s';
+}
+function parseTs(iso){
+  if(typeof iso!=='string'||!iso)return NaN;
+  const s=iso.trim();
+  const ms=Date.parse(s);
+  if(Number.isFinite(ms))return ms;
+  return Date.parse(/Z$|[+-]\d{2}:\d{2}$/.test(s)?s:s+'Z');
+}
 function ago(iso){
-  if(!iso)return '-';
-  const d=Date.now()-new Date(iso.endsWith('Z')?iso:iso+'Z').getTime();
+  const ts=parseTs(iso);
+  if(!Number.isFinite(ts))return '-';
+  const d=Date.now()-ts;
   if(d<0)return '刚刚';const s=Math.floor(d/1000);
   if(s<60)return s+'秒前';if(s<3600)return Math.floor(s/60)+'分钟前';
   if(s<86400)return Math.floor(s/3600)+'小时前';return Math.floor(s/86400)+'天前';
 }
 function nxt(iso,iv){
-  if(!iso)return '-';
-  const n=new Date(iso.endsWith('Z')?iso:iso+'Z').getTime()+iv*1000,d=n-Date.now();
+  const ts=parseTs(iso),interval=Math.floor(Number(iv));
+  if(!Number.isFinite(ts)||!Number.isFinite(interval)||interval<0)return '-';
+  const target=ts+interval*1000,d=target-Date.now();
   if(d<=0)return '即将执行';const s=Math.floor(d/1000);
   if(s<60)return s+'秒';if(s<3600)return Math.floor(s/60)+'分'+s%60+'秒';
   return Math.floor(s/3600)+'时'+Math.floor((s%3600)/60)+'分';
 }
-function n(v){return v==null?0:v;}
+function n(v){const x=Number(v);return Number.isFinite(x)?Math.floor(x):0;}
+function safeId(v){return String(v??'').replace(/[^a-zA-Z0-9_-]/g,'');}
 
 function render(instances){
   const g=document.getElementById('grid');
@@ -292,17 +316,18 @@ function render(instances){
     const lr=i.last_run,s=i.stats,a=s?s.accounts:null,sr=s?s.latest_run:null;
     let sc='idle',st='等待中';
     if(i.running){sc='running';st='运行中...';}
-    else if(lr){if(lr.exit_code===0){sc='ok';st='成功';}else{sc='fail';st='失败 ('+lr.exit_code+')';}}
+    else if(lr){if(Number(lr.exit_code)===0){sc='ok';st='成功';}else{sc='fail';st='失败 ('+n(lr.exit_code)+')';}}
     const mc=i.mode==='maintain'?'badge-maintain':'badge-scan';
     const dis=i.running||i.trigger_pending?'disabled':'';
     const lrt=lr?lr.timestamp:null;
+    const iid=safeId(i.id);
 
     let statsHtml='';
     if(a){
       statsHtml=`
       <div class="section-title">账号统计</div>
       <div class="stat-grid">
-        <div class="stat-box"><div class="stat-num">${n(a.total)}</div><div class="stat-label">总计</div></div>
+        <div class="stat-box"><div class="stat-num">${n(a.total)}</div><div class="stat-label">总账号</div></div>
         <div class="stat-box"><div class="stat-num ok">${n(a.healthy)}</div><div class="stat-label">健康</div></div>
         <div class="stat-box"><div class="stat-num fail">${n(a.invalid_401)}</div><div class="stat-label">失效</div></div>
         <div class="stat-box"><div class="stat-num warn">${n(a.quota_limited)}</div><div class="stat-label">配额耗尽</div></div>
@@ -314,40 +339,40 @@ function render(instances){
     let scanHtml='';
     if(sr){
       scanHtml=`
-      <div class="section-title">最近扫描 #${sr.run_id}</div>
-      <div class="row"><span class="lbl">已扫描</span><span class="val">${sr.probed_files} / ${sr.filtered_files} 个文件</span></div>
-      <div class="row"><span class="lbl">发现失效</span><span class="val fail">${sr.invalid_401_count}</span></div>
-      <div class="row"><span class="lbl">发现配额耗尽</span><span class="val warn">${sr.quota_limited_count}</span></div>
-      <div class="row"><span class="lbl">发现已恢复</span><span class="val ok">${sr.recovered_count}</span></div>
+      <div class="section-title">最近扫描 #${n(sr.run_id)}</div>
+      <div class="row"><span class="lbl">已扫描</span><span class="val">${n(sr.probed_files)} / ${n(sr.filtered_files)} 个文件</span></div>
+      <div class="row"><span class="lbl">发现失效</span><span class="val fail">${n(sr.invalid_401_count)}</span></div>
+      <div class="row"><span class="lbl">发现配额耗尽</span><span class="val warn">${n(sr.quota_limited_count)}</span></div>
+      <div class="row"><span class="lbl">发现已恢复</span><span class="val ok">${n(sr.recovered_count)}</span></div>
       <div class="row"><span class="lbl">完成时间</span><span class="val">${ago(sr.finished_at)}</span></div>`;
     }
 
     let actionsHtml='';
-    if(s&&s.recent_actions&&s.recent_actions.length){
+    if(s&&Array.isArray(s.recent_actions)&&s.recent_actions.length){
       actionsHtml=`<div class="section-title">最近操作</div><div class="action-list">`+
         s.recent_actions.map(a=>{
-          const asc=a.last_action_status==='ok'?'ok':'fail';
-          return `<div class="action-item"><span class="action-name" title="${a.name}">${a.name}</span><span>${a.last_action}</span><span class="${asc}">${a.last_action_status}</span><span class="idle">${ago(a.updated_at)}</span></div>`;
+          const asc=(a.last_action_status==='ok'||a.last_action_status==='success')?'ok':'fail';
+          return `<div class="action-item"><span class="action-name" title="${esc(a.name)}">${esc(a.name)}</span><span>${esc(a.last_action)}</span><span class="${asc}">${esc(a.last_action_status)}</span><span class="idle">${ago(a.updated_at)}</span></div>`;
         }).join('')+`</div>`;
     }
 
     return `<div class="card">
       <div class="card-header">
-        <span class="inst-name">实例 ${i.id}</span>
+        <span class="inst-name">实例 ${iid}</span>
         <span class="badge ${mc}">${i.mode==='maintain'?'维护':'扫描'}</span>
       </div>
-      <div class="row"><span class="lbl">地址</span><span class="val">${i.base_url}</span></div>
+      <div class="row"><span class="lbl">地址</span><span class="val">${esc(i.base_url)||'-'}</span></div>
       <div class="row"><span class="lbl">执行间隔</span><span class="val">${fmt(i.interval)}</span></div>
       <div class="row"><span class="lbl">状态</span><span class="val ${sc}">${st}</span></div>
       <div class="row"><span class="lbl">上次运行</span><span class="val">${lr?((lr.mode==='maintain'?'维护':'扫描')+' · '+ago(lrt)):'-'}</span></div>
       <div class="row"><span class="lbl">下次运行</span><span class="val">${i.running?'-':nxt(lrt,i.interval)}</span></div>
       ${statsHtml}${scanHtml}${actionsHtml}
       <div class="actions">
-        <button class="btn btn-scan" ${dis} onclick="trigger('${i.id}','scan')">扫描</button>
-        <button class="btn btn-maintain" ${dis} onclick="trigger('${i.id}','maintain')">维护</button>
-        <button class="btn btn-log" onclick="toggleLog('${i.id}')">日志</button>
+        <button class="btn btn-scan" ${dis} onclick="trigger('${iid}','scan')">扫描</button>
+        <button class="btn btn-maintain" ${dis} onclick="trigger('${iid}','maintain')">维护</button>
+        <button class="btn btn-log" onclick="toggleLog('${iid}')">日志</button>
       </div>
-      <div class="log-panel" id="log-${i.id}"></div>
+      <div class="log-panel" id="log-${iid}"></div>
     </div>`;
   }).join('');
 }
@@ -356,24 +381,25 @@ async function refresh(){
   try{
     const r=await fetch('/api/instances');
     if(r.status===401){location.href='/login';return;}
-    const d=await r.json();render(d.instances||[]);
+    const d=await r.json();render(Array.isArray(d.instances)?d.instances:[]);
   }catch(e){console.error(e);}
   document.getElementById('clock').textContent=new Date().toLocaleString('zh-CN');
 }
 
 async function trigger(id,mode){
   try{
-    const r=await fetch('/api/trigger/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});
+    const r=await fetch('/api/trigger/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});
     const d=await r.json();if(!d.ok)alert(d.error);setTimeout(refresh,500);
   }catch(e){alert(e);}
 }
 
 async function toggleLog(id){
   const el=document.getElementById('log-'+id);
+  if(!el)return;
   if(el.classList.contains('open')){el.classList.remove('open');return;}
   el.textContent='加载中...';el.classList.add('open');
   try{
-    const r=await fetch('/api/logs/'+id);const d=await r.json();
+    const r=await fetch('/api/logs/'+encodeURIComponent(id));const d=await r.json();
     el.textContent=d.logs||'暂无日志';
     el.scrollTop=el.scrollHeight;
   }catch(e){el.textContent='日志加载失败';}
@@ -421,7 +447,11 @@ class _Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/logs/"):
             iid = path.rsplit("/", 1)[-1]
             qs = parse_qs(parsed.query)
-            lines = min(int(qs.get("lines", ["80"])[0]), 500)
+            try:
+                lines = int(qs.get("lines", ["80"])[0])
+            except (TypeError, ValueError):
+                lines = 80
+            lines = max(1, min(lines, 500))
             if not iid.isalnum():
                 self._json(400, {"error": "无效 ID"})
                 return
